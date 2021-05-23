@@ -1,0 +1,18 @@
+Transaction Parser
+=================
+
+Small application that can process transaction data as input (CSV) and ouputs CSV,
+with the resulting account situation.
+
+To build:
+- cargo build
+
+To run:
+- cargo run -- input.csv > output.csv
+
+
+TODO:
+ - unit tests to be implemented (coverage would be nice)
+ - better comments in the code
+ - maybe ability to parse more than one input file (a folder, a path)
+ - look into how this can be made more efficient, memory wise
