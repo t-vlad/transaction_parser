@@ -89,12 +89,12 @@ fn main() {
 
                 match transaction_type {
                     "deposit" => {
-                        if client_account.deposit(transaction.amount) {
+                        if client_account.deposit(transaction.get_amount()) {
                             transactions.insert(transaction.tx, transaction);                            
                             }                        
                     },
                     "withdrawal" => {
-                        if client_account.withdraw(transaction.amount) {
+                        if client_account.withdraw(transaction.get_amount()) {
                             transactions.insert(transaction.tx, transaction);
                         }
                     },
@@ -200,12 +200,23 @@ struct Transaction {
     client: u16,
 
     tx: u32,
-
-    amount: f32,
+    
+    amount: Option<f32>,
 
     #[serde(skip_deserializing)]
     disputed: bool
 
+}
+
+impl Transaction {
+    fn get_amount(&self) -> f32 {
+        // default the amount to zero
+        let amount = match self.amount {
+            Some(a) => a,
+            None => 0.0
+        };
+        amount
+    }
 }
 
 // Account representation
@@ -229,12 +240,19 @@ impl Account {
             locked: false
         }
     }
+
+    fn round_amounts(&mut self) {
+        self.available = (self.available * 10000.0).round() / 10000.0;
+        self.held = (self.held * 10000.0).round() / 10000.0;
+        self.total = (self.total * 10000.0).round() / 10000.0;
+    }
     
     fn deposit(&mut self, amount: f32) -> bool{
         match self.locked {
             false => {
                 self.available += amount;
                 self.total += amount;
+                self.round_amounts();
                 },
             true => {
                 eprintln!("Account {} locked, cannot deposit {}", self.client, amount);
@@ -250,6 +268,7 @@ impl Account {
                 if self.available - amount > 0.0  {
                     self.available -= amount;
                     self.total -= amount;
+                    self.round_amounts();
                 } else {
                     eprintln!("Could not withdraw {} from {}. Not enough funds!", amount, self.client);
                     return false;
@@ -266,8 +285,10 @@ impl Account {
     fn dispute(&mut self, tx: &Transaction) -> bool{
         match self.locked {
             false => {
-                self.held += tx.amount;
-                self.available -= tx.amount;
+                let amt = tx.get_amount();
+                self.held += amt;
+                self.available -= amt;
+                self.round_amounts();
             },
             true => {
                 eprintln!("Account {} locked, cannot dispute!", self.client);
@@ -280,8 +301,10 @@ impl Account {
     fn resolve(&mut self, tx: &Transaction) -> bool{
         match self.locked {
             false => {
-                self.held -= tx.amount;
-                self.available += tx.amount;
+                let amt = tx.get_amount();
+                self.held -= amt;
+                self.available += amt;
+                self.round_amounts();
             },
             true => {
                 eprintln!("Account {} locked, cannot resolve!", self.client);
@@ -294,9 +317,11 @@ impl Account {
     fn chargeback(&mut self, tx: &Transaction) -> bool {
         match self.locked {
             false => {
-                self.held -= tx.amount;
-                self.total -= tx.amount;
+                let amt = tx.get_amount();
+                self.held -= amt;
+                self.total -= amt;
                 self.locked = true;
+                self.round_amounts();
             },
             true => {
                 eprintln!("Account {} locked, cannot chargeback!", self.client);
@@ -305,4 +330,116 @@ impl Account {
         }
         true
     }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_deposit() {
+        let mut acc = Account::new(&123);
+        acc.deposit(3.1415);
+        assert_eq!(acc.available, 3.1415);
+        assert_eq!(acc.total, 3.1415);
+    }
+
+    #[test]
+    fn test_withdraw() {
+        let mut acc = Account::new(&123);
+        acc.deposit(3.1415);
+        acc.withdraw(2.1414);
+        assert_eq!(acc.available, 1.0001);
+        assert_eq!(acc.total, 1.0001);
+        // test withdraw more than available
+        assert_eq!(acc.withdraw(12.1414), false);
+    }
+
+    #[test]
+    fn test_dispute() {
+        let mut acc = Account::new(&123);
+        acc.deposit(10.1234);
+        let tr = Transaction{
+            r#type: String::from("withdraw"),
+            client: 123,
+            tx: 5001,
+            amount: Some(5.1002),
+            disputed: false
+        };
+        acc.withdraw(5.1002);
+
+        acc.dispute(&tr);
+        assert_eq!(acc.available, -0.077);
+        assert_eq!(acc.held, 5.1002);
+        assert_eq!(acc.total, 5.0232);
+    }
+
+    #[test]
+    fn test_resolve() {
+        let mut acc = Account::new(&123);
+        acc.deposit(10.1234);
+        let tr = Transaction{
+            r#type: String::from("withdraw"),
+            client: 123,
+            tx: 5001,
+            amount: Some(5.1002),
+            disputed: false
+        };
+        acc.withdraw(5.1002);
+
+        acc.dispute(&tr);
+
+        acc.resolve(&tr);
+        assert_eq!(acc.available, 5.0232);
+        assert_eq!(acc.held, 0.0);
+        assert_eq!(acc.total, 5.0232);
+    }
+
+    #[test]
+    fn test_chargeback() {
+        let mut acc = Account::new(&123);
+        acc.deposit(10.1234);
+        let tr = Transaction{
+            r#type: String::from("withdraw"),
+            client: 123,
+            tx: 5001,
+            amount: Some(5.1002),
+            disputed: false
+        };
+        acc.withdraw(5.1002);
+
+        acc.dispute(&tr);
+
+        acc.chargeback(&tr);
+        assert_eq!(acc.available, -0.077);
+        assert_eq!(acc.held, 0.0);
+        assert_eq!(acc.total, -0.077);
+        assert_eq!(acc.locked, true);
+    }
+
+    #[test]
+    fn test_locked_operations() {
+        let mut acc = Account::new(&123);
+        acc.deposit(10.1234);
+        let tr = Transaction{
+            r#type: String::from("withdraw"),
+            client: 123,
+            tx: 5001,
+            amount: Some(5.1002),
+            disputed: false
+        };
+        acc.withdraw(5.1002);
+
+        acc.dispute(&tr);
+
+        acc.chargeback(&tr);
+        assert_eq!(acc.deposit(0.1), false);
+        assert_eq!(acc.withdraw(0.1), false);
+        assert_eq!(acc.dispute(&tr), false);
+        assert_eq!(acc.resolve(&tr), false);
+        assert_eq!(acc.chargeback(&tr), false);
+    }
+
+
 }

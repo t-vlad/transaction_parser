@@ -12,7 +12,8 @@ To run:
 
 
 TODO:
- - unit tests to be implemented (coverage would be nice)
  - better comments in the code
  - maybe ability to parse more than one input file (a folder, a path)
  - look into how this can be made more efficient, memory wise
+
+Ideas for improvment
